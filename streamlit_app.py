@@ -62,6 +62,27 @@ with st.sidebar:
         time.sleep(0.7)
         st.rerun()
 
+    # --------------------------------------
+    # Cadastro em Massa
+    # --------------------------------------
+    st.markdown("---")
+    st.header("📋 Cadastro em Massa")
+
+    bulk_input = st.text_area("Cole tickers (um por linha ou separados por vírgula)")
+    default_sector = st.text_input("Setor padrão (opcional)", "")
+    default_industry = st.text_input("Indústria padrão (opcional)", "")
+
+    if st.button("Cadastrar lista"):
+        tickers_bulk = [t.strip().upper() for t in bulk_input.replace(",", "\n").splitlines() if t.strip()]
+        if tickers_bulk:
+            for t in tickers_bulk:
+                upsert_ticker(t, sector=default_sector, industry=default_industry, is_active=True)
+            st.success(f"{len(tickers_bulk)} tickers cadastrados!")
+            time.sleep(0.7)
+            st.rerun()
+        else:
+            st.warning("Nenhum ticker válido informado.")
+
 # ==========================================
 # Carregar lista de tickers cadastrados
 # ==========================================
@@ -136,4 +157,4 @@ if {"Daily","Weekly"}.issubset(df_status.columns):
 else:
     st.dataframe(df_status, use_container_width=True, height=400)
 
-st.caption("Versão MVP com Daily + Weekly, coloração de candles e opção de excluir símbolos.")
+st.caption("Versão MVP com cadastro individual + em massa, edição, exclusão e classificação Daily/Weekly.")
