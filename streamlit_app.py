@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 
-from lib.db import read_tickers, upsert_ticker
+from lib.db import read_tickers, upsert_ticker, delete_ticker
 
 st.set_page_config(page_title="Cadastro de Ações EUA", page_icon="📈", layout="wide")
 st.title("📈 Cadastro de Ações (EUA) – TheStrat Classificação")
@@ -70,6 +70,19 @@ df_tickers = read_tickers()
 st.subheader("🔎 Lista de Tickers")
 st.dataframe(df_tickers.sort_values("symbol"), use_container_width=True, height=250)
 
+# ==========================================
+# Opção de apagar ticker
+# ==========================================
+if not df_tickers.empty:
+    st.subheader("🗑️ Remover Ticker")
+    to_delete = st.selectbox("Escolha um ticker para apagar",
+                             options=df_tickers["symbol"].tolist())
+    if st.button("Apagar ticker selecionado"):
+        delete_ticker(to_delete)
+        st.success(f"Ticker {to_delete} removido!")
+        time.sleep(0.7)
+        st.rerun()
+
 st.divider()
 
 # ==========================================
@@ -113,4 +126,4 @@ st.write("**Classificação (anterior/atual)**")
 st.dataframe(df_status.style.applymap(highlight, subset=["Daily","Weekly"]),
              use_container_width=True, height=400)
 
-st.caption("Versão MVP com Daily + Weekly — igual à planilha Excel com coloração de candles.")
+st.caption("Versão MVP com Daily + Weekly, coloração de candles e opção de excluir símbolos.")
