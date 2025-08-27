@@ -83,3 +83,15 @@ def upsert_ticker(symbol: str, name: str = "", sector: str = "", industry: str =
                 "symbol":symbol, "name":name, "sector":sector, "industry":industry, "is_active":is_active
             }])], ignore_index=True)
         save_csv(df)
+def delete_ticker(symbol: str) -> None:
+    symbol = (symbol or "").upper().strip()
+    if not symbol:
+        return
+    sb = get_supabase_client()
+    if sb:
+        table = os.environ.get("SUPABASE_TABLE", "tickers")
+        sb.table(table).delete().eq("symbol", symbol).execute()
+    else:
+        df = load_csv()
+        df = df[df["symbol"] != symbol]
+        save_csv(df)
