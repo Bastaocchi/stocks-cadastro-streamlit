@@ -107,6 +107,11 @@ for sym in universe:
 
 df_status = pd.DataFrame(rows)
 
+# Garante que as colunas existam
+for col in ["Daily", "Weekly"]:
+    if col not in df_status.columns:
+        df_status[col] = "—"
+
 # ==========================================
 # Coloração estilo Excel
 # ==========================================
@@ -123,7 +128,12 @@ def highlight(val):
     return ""
 
 st.write("**Classificação (anterior/atual)**")
-st.dataframe(df_status.style.applymap(highlight, subset=["Daily","Weekly"]),
-             use_container_width=True, height=400)
+if {"Daily","Weekly"}.issubset(df_status.columns):
+    st.dataframe(
+        df_status.style.applymap(highlight, subset=["Daily","Weekly"]),
+        use_container_width=True, height=400
+    )
+else:
+    st.dataframe(df_status, use_container_width=True, height=400)
 
 st.caption("Versão MVP com Daily + Weekly, coloração de candles e opção de excluir símbolos.")
