@@ -5,12 +5,45 @@ import pandas as pd
 import yfinance as yf
 
 from lib.db import read_tickers, upsert_ticker
-from lib.strat import classify_last_two_bars
 
 st.set_page_config(page_title="Cadastro de Ações EUA", page_icon="📈", layout="wide")
-st.title("📈 Cadastro de Ações (EUA) – MVP")
+st.title("📈 Cadastro de Ações (EUA) – TheStrat Classificação")
 
-# Sidebar: Formulário de cadastro
+# ==========================================
+# Funções de classificação
+# ==========================================
+def candle_type(prev, curr):
+    prev_high = float(prev['High'])
+    prev_low  = float(prev['Low'])
+    curr_high = float(curr['High'])
+    curr_low  = float(curr['Low'])
+    if curr_high <= prev_high and curr_low >= prev_low:
+        return "1"
+    elif curr_high >= prev_high and curr_low <= prev_low:
+        return "3"
+    elif curr_high > prev_high:
+        return "2u"
+    elif curr_low < prev_low:
+        return "2d"
+    else:
+        return "2"
+
+def classify_pair(symbol):
+    out = {}
+    for tf_name, tf_interval in {"Daily": "1d", "Weekly": "1wk"}.items():
+        df = yf.download(symbol, period="1y", interval=tf_interval,
+                         progress=False, auto_adjust=True)
+        if len(df) < 3:
+            out[tf_name] = "N/A"
+            continue
+        tipo_ultima = candle_type(df.iloc[-2], df.iloc[-1])
+        tipo_anterior = candle_type(df.iloc[-3], df.iloc[-2])
+        out[tf_name] = f"{tipo_anterior}/{tipo_ultima}"
+    return out
+
+# ==========================================
+# Sidebar: cadastro de tickers
+# ==========================================
 with st.sidebar:
     st.header("Cadastrar/Editar Ticker")
     with st.form("cadastro"):
@@ -29,80 +62,55 @@ with st.sidebar:
         time.sleep(0.7)
         st.rerun()
 
-# Carregar lista
+# ==========================================
+# Carregar lista de tickers cadastrados
+# ==========================================
 df_tickers = read_tickers()
 
-# Filtros
 st.subheader("🔎 Lista de Tickers")
-colf1, colf2, colf3 = st.columns([2,2,1])
-with colf1:
-    f_sector = st.text_input("Filtrar por Setor")
-with colf2:
-    f_industry = st.text_input("Filtrar por Indústria")
-with colf3:
-    f_active = st.selectbox("Ativo?", ("Todos","Somente ativos","Somente inativos"), index=1)
-
-f = df_tickers.copy()
-if f_sector:
-    f = f[f["sector"].fillna("").str.contains(f_sector, case=False, na=False)]
-if f_industry:
-    f = f[f["industry"].fillna("").str.contains(f_industry, case=False, na=False)]
-if f_active == "Somente ativos":
-    f = f[f["is_active"] == True]
-elif f_active == "Somente inativos":
-    f = f[f["is_active"] == False]
-
-st.dataframe(f.sort_values("symbol"), use_container_width=True, height=320)
+st.dataframe(df_tickers.sort_values("symbol"), use_container_width=True, height=250)
 
 st.divider()
 
-# Classificação TheStrat diária + Relatório por setor
-st.subheader("📊 Classificação TheStrat (D1) e Relatório por Setor")
+# ==========================================
+# Classificação TheStrat Daily + Weekly
+# ==========================================
+st.subheader("📊 Classificação TheStrat (Daily + Weekly)")
 
-# Seleção de universo para cálculo (evitar chamadas excessivas)
 sel = st.multiselect(
-    "Selecione alguns tickers para calcular agora (deixe vazio para usar os 20 primeiros ativos)",
-    options=f[f["is_active"]==True]["symbol"].tolist(),
+    "Selecione alguns tickers (ou deixe vazio para usar os 20 primeiros ativos)",
+    options=df_tickers[df_tickers["is_active"]==True]["symbol"].tolist(),
 )
 
-universe = sel if sel else f[f["is_active"]==True]["symbol"].head(20).tolist()
-
-@st.cache_data(ttl=3600)
-def fetch_ohlc(symbol: str, period: str = "3mo") -> pd.DataFrame:
-    data = yf.download(symbol, period=period, interval="1d", auto_adjust=False, progress=False)
-    if data is None or data.empty:
-        return pd.DataFrame()
-    data = data.rename(columns={"Open":"Open","High":"High","Low":"Low","Close":"Close","Volume":"Volume"})
-    return data[["Open","High","Low","Close","Volume"]]
+universe = sel if sel else df_tickers[df_tickers["is_active"]==True]["symbol"].head(20).tolist()
 
 rows = []
 for sym in universe:
     try:
-        ohlc = fetch_ohlc(sym)
-        status = classify_last_two_bars(ohlc)
-        rows.append({"symbol": sym, "the_strat": status})
+        pair = classify_pair(sym)
+        rows.append({"Ticker": sym, "Daily": pair["Daily"], "Weekly": pair["Weekly"]})
     except Exception:
-        rows.append({"symbol": sym, "the_strat": "—"})
+        rows.append({"Ticker": sym, "Daily": "—", "Weekly": "—"})
 
 df_status = pd.DataFrame(rows)
 
-# Tabela de status
-st.write("**Status diário (D1) – últimos 2 candles**")
-st.dataframe(df_status, use_container_width=True, height=300)
+# ==========================================
+# Coloração estilo Excel
+# ==========================================
+def highlight(val):
+    if not isinstance(val, str): return ""
+    if "/" in val:
+        atual = val.split("/")[1]
+    else:
+        atual = val
+    if atual == "2u": return "background-color: lightgreen; color:black;"
+    if atual == "2d": return "background-color: tomato; color:black;"
+    if atual == "3": return "background-color: orange; color:white;"
+    if atual == "1": return "background-color: violet; color:white;"
+    return ""
 
-# Relatório por setor (% 2u / % 2d)
-if not f.empty:
-    merged = f.merge(df_status, on="symbol", how="left")
-    merged = merged[merged["is_active"] == True]
-    sector_grp = merged.groupby(merged["sector"].fillna("(Sem setor)"))
-    rep = sector_grp.apply(lambda g: pd.Series({
-        "tickers": len(g),
-        "% 2u": round((g["the_strat"] == "2u").mean()*100, 1),
-        "% 2d": round((g["the_strat"] == "2d").mean()*100, 1),
-    })).reset_index().rename(columns={"sector":"Setor"})
-    st.write("**Relatório por setor** (considera apenas o conjunto calculado acima)")
-    st.dataframe(rep.sort_values("Setor"), use_container_width=True)
-else:
-    st.info("Cadastre tickers para ver o relatório por setor.")
+st.write("**Classificação (anterior/atual)**")
+st.dataframe(df_status.style.applymap(highlight, subset=["Daily","Weekly"]),
+             use_container_width=True, height=400)
 
-st.caption("MVP – para produção, configure uma API de mercado e Supabase.")
+st.caption("Versão MVP com Daily + Weekly — igual à planilha Excel com coloração de candles.")
