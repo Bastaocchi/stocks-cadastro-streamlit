@@ -8,7 +8,7 @@ import streamlit as st
 # Config inicial
 # ==========================================
 st.set_page_config(page_title="Scanner TheStrat", page_icon="📊", layout="wide")
-st.title("📊 Scanner TheStrat – Estilo Dashboard")
+st.title("📊 Scanner TheStrat – Lógica Colab")
 
 # ==========================================
 # Carregar base oficial
@@ -16,7 +16,7 @@ st.title("📊 Scanner TheStrat – Estilo Dashboard")
 def load_data():
     df = pd.read_csv("data/simbolos700.csv")
     if "Sub_Group" not in df.columns:
-        df["Sub_Group"] = ""  # garante coluna extra
+        df["Sub_Group"] = ""
     if "Daily" not in df.columns:
         df["Daily"] = ""
     if "Weekly" not in df.columns:
@@ -26,37 +26,35 @@ def load_data():
 df_master = load_data()
 
 # ==========================================
-# Função de classificação TheStrat
+# Função candle_type (igual Colab)
 # ==========================================
 def candle_type(prev, curr):
-    prev_high, prev_low = float(prev["High"]), float(prev["Low"])
-    curr_high, curr_low = float(curr["High"]), float(curr["Low"])
+    prev_high = float(prev['High'])
+    prev_low  = float(prev['Low'])
+    curr_high = float(curr['High'])
+    curr_low  = float(curr['Low'])
 
-    # Inside bar
     if curr_high <= prev_high and curr_low >= prev_low:
         return "1"
-    # Outside bar
-    if curr_high >= prev_high and curr_low <= prev_low:
+    elif curr_high >= prev_high and curr_low <= prev_low:
         return "3"
-    # 2u: rompeu apenas a máxima
-    if curr_high > prev_high and curr_low >= prev_low:
+    elif curr_high > prev_high:
         return "2u"
-    # 2d: rompeu apenas a mínima
-    if curr_low < prev_low and curr_high <= prev_high:
+    elif curr_low < prev_low:
         return "2d"
-    return "2"
+    else:
+        return "2"
 
 def classify_pair(symbol):
     out = {}
     for tf_name, tf_interval in {"Daily":"1d", "Weekly":"1wk"}.items():
         df = yf.download(symbol, period="1y", interval=tf_interval,
-                         progress=False, auto_adjust=False)
-        if len(df) < 4:
+                         progress=False, auto_adjust=True)  # ⚠️ igual Colab
+        if len(df) < 3:
             out[tf_name] = "N/A"
             continue
-        # pega os dois últimos fechados (ignora candle em formação)
-        tipo_ultima = candle_type(df.iloc[-3], df.iloc[-2])
-        tipo_anterior = candle_type(df.iloc[-4], df.iloc[-3])
+        tipo_ultima = candle_type(df.iloc[-2], df.iloc[-1])       # última comparação
+        tipo_anterior = candle_type(df.iloc[-3], df.iloc[-2])     # anterior
         out[tf_name] = f"{tipo_anterior}/{tipo_ultima}"
     return out
 
@@ -83,12 +81,10 @@ if st.button("🔄 Atualizar dados"):
             df_master.loc[df_master["Symbol"] == sym, "Daily"] = "—"
             df_master.loc[df_master["Symbol"] == sym, "Weekly"] = "—"
 
-        # Atualiza barra
         progress.progress((i+1)/total)
 
-    # Salva resultados
     df_master.to_csv("data/simbolos700.csv", index=False)
-    st.success(f"✅ Dados atualizados e salvos no CSV ({update_limit} símbolos)!")
+    st.success(f"✅ Dados atualizados ({update_limit} símbolos)!")
     time.sleep(0.7)
     st.rerun()
 
@@ -105,7 +101,6 @@ with col3:
 with col4:
     search_symbol = st.text_input("🔍 Buscar símbolo").upper().strip()
 
-# Aplicar filtros
 filtered = df_master.copy()
 if etf: filtered = filtered[filtered["ETF_Symbol"] == etf]
 if industry: filtered = filtered[filtered["TradingView_Industry"] == industry]
@@ -129,7 +124,7 @@ if weekly_filter:
 st.markdown(f"**🔎 Símbolos após filtros: {len(filtered)}**")
 
 # ==========================================
-# Coloração estilo Pure Alpha
+# Coloração estilo Colab (Pure Alpha)
 # ==========================================
 def highlight(val):
     if not isinstance(val, str): return ""
@@ -143,44 +138,3 @@ def highlight(val):
 st.dataframe(filtered[["Symbol","Daily","Weekly","Sector_SPDR","TradingView_Industry","Sub_Group"]]
              .style.applymap(highlight, subset=["Daily","Weekly"]),
              use_container_width=True, height=600)
-
-# ==========================================
-# Resumo setorial (% 2u / 2d)
-# ==========================================
-st.subheader("📊 Resumo por Setor")
-
-summary = []
-for sector in df_master["Sector_SPDR"].unique():
-    subset_sec = filtered[filtered["Sector_SPDR"] == sector]
-    if len(subset_sec) == 0: continue
-    total = len(subset_sec)
-    count_2u = sum(subset_sec["Daily"].str.endswith("2u"))
-    count_2d = sum(subset_sec["Daily"].str.endswith("2d"))
-    summary.append({
-        "Sector": sector,
-        "Total": total,
-        "%2u": round(count_2u/total*100,1),
-        "%2d": round(count_2d/total*100,1),
-    })
-
-df_summary = pd.DataFrame(summary)
-
-cols = st.columns(len(df_summary))
-for i, row in df_summary.iterrows():
-    with cols[i]:
-        st.metric(label=row["Sector"],
-                  value=f"2u {row['%2u']}% | 2d {row['%2d']}%",
-                  delta=f"Total {row['Total']}")
-
-# ==========================================
-# Editor Sub_Group
-# ==========================================
-st.subheader("✏️ Editar Sub-Grupo")
-edit_symbol = st.selectbox("Escolha um símbolo", df_master["Symbol"].tolist())
-new_group = st.text_input("Novo Sub-Grupo", "")
-if st.button("Salvar Sub-Grupo"):
-    df_master.loc[df_master["Symbol"] == edit_symbol, "Sub_Group"] = new_group
-    df_master.to_csv("data/simbolos700.csv", index=False)
-    st.success(f"Sub-Grupo '{new_group}' salvo para {edit_symbol}")
-    time.sleep(0.7)
-    st.rerun()
