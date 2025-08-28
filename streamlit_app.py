@@ -26,18 +26,23 @@ def load_data():
 df_master = load_data()
 
 # ==========================================
-# Funções de candle
+# Função de classificação TheStrat
 # ==========================================
 def candle_type(prev, curr):
     prev_high, prev_low = float(prev["High"]), float(prev["Low"])
     curr_high, curr_low = float(curr["High"]), float(curr["Low"])
+
+    # Inside bar
     if curr_high <= prev_high and curr_low >= prev_low:
         return "1"
-    elif curr_high >= prev_high and curr_low <= prev_low:
+    # Outside bar
+    if curr_high >= prev_high and curr_low <= prev_low:
         return "3"
-    elif curr_high > prev_high:
+    # 2u: rompeu apenas a máxima
+    if curr_high > prev_high and curr_low >= prev_low:
         return "2u"
-    elif curr_low < prev_low:
+    # 2d: rompeu apenas a mínima
+    if curr_low < prev_low and curr_high <= prev_high:
         return "2d"
     return "2"
 
@@ -45,24 +50,31 @@ def classify_pair(symbol):
     out = {}
     for tf_name, tf_interval in {"Daily":"1d", "Weekly":"1wk"}.items():
         df = yf.download(symbol, period="1y", interval=tf_interval,
-                         progress=False, auto_adjust=True)
-        if len(df) < 3:
+                         progress=False, auto_adjust=False)
+        if len(df) < 4:
             out[tf_name] = "N/A"
             continue
-        tipo_ultima = candle_type(df.iloc[-2], df.iloc[-1])
-        tipo_anterior = candle_type(df.iloc[-3], df.iloc[-2])
+        # pega os dois últimos fechados (ignora candle em formação)
+        tipo_ultima = candle_type(df.iloc[-3], df.iloc[-2])
+        tipo_anterior = candle_type(df.iloc[-4], df.iloc[-3])
         out[tf_name] = f"{tipo_anterior}/{tipo_ultima}"
     return out
+
+# ==========================================
+# Slider para controlar quantos símbolos atualizar
+# ==========================================
+st.sidebar.header("⚙️ Configurações")
+update_limit = st.sidebar.slider("Qtd. símbolos para atualizar", 5, 200, 20)
 
 # ==========================================
 # Botão de atualização com barra de progresso
 # ==========================================
 if st.button("🔄 Atualizar dados"):
-    st.info("⏳ Atualizando dados, aguarde...")
+    st.info(f"⏳ Atualizando {update_limit} símbolos, aguarde...")
     progress = st.progress(0)
-    total = len(df_master)
+    total = min(update_limit, len(df_master))
 
-    for i, sym in enumerate(df_master["Symbol"].tolist()):
+    for i, sym in enumerate(df_master["Symbol"].tolist()[:update_limit]):
         try:
             pair = classify_pair(sym)
             df_master.loc[df_master["Symbol"] == sym, "Daily"] = pair["Daily"]
@@ -76,7 +88,7 @@ if st.button("🔄 Atualizar dados"):
 
     # Salva resultados
     df_master.to_csv("data/simbolos700.csv", index=False)
-    st.success("✅ Dados atualizados e salvos no CSV!")
+    st.success(f"✅ Dados atualizados e salvos no CSV ({update_limit} símbolos)!")
     time.sleep(0.7)
     st.rerun()
 
