@@ -55,12 +55,14 @@ def classify_pair(symbol):
     return out
 
 # ==========================================
-# Botão de atualização
+# Botão de atualização com barra de progresso
 # ==========================================
 if st.button("🔄 Atualizar dados"):
     st.info("⏳ Atualizando dados, aguarde...")
-    rows = []
-    for sym in df_master["Symbol"].tolist():
+    progress = st.progress(0)
+    total = len(df_master)
+
+    for i, sym in enumerate(df_master["Symbol"].tolist()):
         try:
             pair = classify_pair(sym)
             df_master.loc[df_master["Symbol"] == sym, "Daily"] = pair["Daily"]
@@ -68,6 +70,11 @@ if st.button("🔄 Atualizar dados"):
         except Exception:
             df_master.loc[df_master["Symbol"] == sym, "Daily"] = "—"
             df_master.loc[df_master["Symbol"] == sym, "Weekly"] = "—"
+
+        # Atualiza barra
+        progress.progress((i+1)/total)
+
+    # Salva resultados
     df_master.to_csv("data/simbolos700.csv", index=False)
     st.success("✅ Dados atualizados e salvos no CSV!")
     time.sleep(0.7)
