@@ -1,22 +1,32 @@
-import os
-import time
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-
-from lib.db import read_tickers, upsert_ticker, delete_ticker
-
-st.set_page_config(page_title="Cadastro de Ações EUA", page_icon="📈", layout="wide")
-st.title("📈 Cadastro de Ações (EUA) – TheStrat Classificação")
+import time
 
 # ==========================================
-# Funções de classificação
+# Configuração inicial
+# ==========================================
+st.set_page_config(page_title="Scanner TheStrat", page_icon="📈", layout="wide")
+st.title("📈 Scanner TheStrat – Base 700 Símbolos")
+
+# ==========================================
+# Carregar base oficial CSV
+# ==========================================
+@st.cache_data
+def load_data():
+    df = pd.read_csv("simbolos700.csv")
+    if "Sub_Group" not in df.columns:
+        df["Sub_Group"] = ""  # coluna livre
+    return df
+
+df_master = load_data()
+
+# ==========================================
+# Funções de candle
 # ==========================================
 def candle_type(prev, curr):
-    prev_high = float(prev['High'])
-    prev_low  = float(prev['Low'])
-    curr_high = float(curr['High'])
-    curr_low  = float(curr['Low'])
+    prev_high, prev_low = float(prev["High"]), float(prev["Low"])
+    curr_high, curr_low = float(curr["High"]), float(curr["Low"])
     if curr_high <= prev_high and curr_low >= prev_low:
         return "1"
     elif curr_high >= prev_high and curr_low <= prev_low:
@@ -25,12 +35,11 @@ def candle_type(prev, curr):
         return "2u"
     elif curr_low < prev_low:
         return "2d"
-    else:
-        return "2"
+    return "2"
 
 def classify_pair(symbol):
     out = {}
-    for tf_name, tf_interval in {"Daily": "1d", "Weekly": "1wk"}.items():
+    for tf_name, tf_interval in {"Daily":"1d", "Weekly":"1wk"}.items():
         df = yf.download(symbol, period="1y", interval=tf_interval,
                          progress=False, auto_adjust=True)
         if len(df) < 3:
@@ -42,119 +51,65 @@ def classify_pair(symbol):
     return out
 
 # ==========================================
-# Sidebar: cadastro de tickers
+# Filtros
 # ==========================================
-with st.sidebar:
-    st.header("Cadastrar/Editar Ticker")
-    with st.form("cadastro"):
-        symbol = st.text_input("Símbolo (ex.: AAPL, MSFT)").upper().strip()
-        col1, col2 = st.columns(2)
-        with col1:
-            name = st.text_input("Nome", placeholder="Apple Inc.")
-            sector = st.text_input("Setor", placeholder="Technology")
-        with col2:
-            industry = st.text_input("Indústria", placeholder="Consumer Electronics")
-            is_active = st.checkbox("Ativo", value=True)
-        submitted = st.form_submit_button("Salvar/Atualizar")
-    if submitted and symbol:
-        upsert_ticker(symbol, name, sector, industry, is_active)
-        st.success(f"Ticker {symbol} salvo!")
-        time.sleep(0.7)
-        st.rerun()
+st.sidebar.header("Filtros")
+etf = st.sidebar.selectbox("🎯 ETF (XLK, XLY...)", [""] + sorted(df_master["ETF_Symbol"].unique()))
+industry = st.sidebar.selectbox("🏭 Indústria", [""] + sorted(df_master["TradingView_Industry"].unique()))
+sub_group = st.sidebar.selectbox("🔖 Sub-Grupo", [""] + sorted(df_master["Sub_Group"].dropna().unique()))
 
-    # --------------------------------------
-    # Cadastro em Massa
-    # --------------------------------------
-    st.markdown("---")
-    st.header("📋 Cadastro em Massa")
+filtered = df_master.copy()
+if etf: filtered = filtered[filtered["ETF_Symbol"] == etf]
+if industry: filtered = filtered[filtered["TradingView_Industry"] == industry]
+if sub_group: filtered = filtered[filtered["Sub_Group"] == sub_group]
 
-    bulk_input = st.text_area("Cole tickers (um por linha ou separados por vírgula)")
-    default_sector = st.text_input("Setor padrão (opcional)", "")
-    default_industry = st.text_input("Indústria padrão (opcional)", "")
-
-    if st.button("Cadastrar lista"):
-        tickers_bulk = [t.strip().upper() for t in bulk_input.replace(",", "\n").splitlines() if t.strip()]
-        if tickers_bulk:
-            for t in tickers_bulk:
-                upsert_ticker(t, sector=default_sector, industry=default_industry, is_active=True)
-            st.success(f"{len(tickers_bulk)} tickers cadastrados!")
-            time.sleep(0.7)
-            st.rerun()
-        else:
-            st.warning("Nenhum ticker válido informado.")
+st.write(f"### 🎯 Total de símbolos filtrados: {len(filtered)}")
 
 # ==========================================
-# Carregar lista de tickers cadastrados
+# Classificação TheStrat para subset
 # ==========================================
-df_tickers = read_tickers()
-
-st.subheader("🔎 Lista de Tickers")
-st.dataframe(df_tickers.sort_values("symbol"), use_container_width=True, height=250)
-
-# ==========================================
-# Opção de apagar ticker
-# ==========================================
-if not df_tickers.empty:
-    st.subheader("🗑️ Remover Ticker")
-    to_delete = st.selectbox("Escolha um ticker para apagar",
-                             options=df_tickers["symbol"].tolist())
-    if st.button("Apagar ticker selecionado"):
-        delete_ticker(to_delete)
-        st.success(f"Ticker {to_delete} removido!")
-        time.sleep(0.7)
-        st.rerun()
-
-st.divider()
-
-# ==========================================
-# Classificação TheStrat Daily + Weekly
-# ==========================================
-st.subheader("📊 Classificação TheStrat (Daily + Weekly)")
-
-sel = st.multiselect(
-    "Selecione alguns tickers (ou deixe vazio para usar os 20 primeiros ativos)",
-    options=df_tickers[df_tickers["is_active"]==True]["symbol"].tolist(),
-)
-
-universe = sel if sel else df_tickers[df_tickers["is_active"]==True]["symbol"].head(20).tolist()
-
 rows = []
-for sym in universe:
+subset = filtered.head(50)  # limite inicial p/ não travar
+for sym in subset["Symbol"].tolist():
     try:
         pair = classify_pair(sym)
-        rows.append({"Ticker": sym, "Daily": pair["Daily"], "Weekly": pair["Weekly"]})
+        rows.append({
+            "Symbol": sym,
+            "Daily": pair["Daily"],
+            "Weekly": pair["Weekly"],
+            "Sector": filtered.loc[filtered["Symbol"]==sym,"Sector_SPDR"].values[0],
+            "Industry": filtered.loc[filtered["Symbol"]==sym,"TradingView_Industry"].values[0],
+            "Sub_Group": filtered.loc[filtered["Symbol"]==sym,"Sub_Group"].values[0]
+        })
     except Exception:
-        rows.append({"Ticker": sym, "Daily": "—", "Weekly": "—"})
+        rows.append({"Symbol": sym, "Daily":"—", "Weekly":"—"})
 
 df_status = pd.DataFrame(rows)
-
-# Garante que as colunas existam
-for col in ["Daily", "Weekly"]:
-    if col not in df_status.columns:
-        df_status[col] = "—"
 
 # ==========================================
 # Coloração estilo Excel
 # ==========================================
 def highlight(val):
     if not isinstance(val, str): return ""
-    if "/" in val:
-        atual = val.split("/")[1]
-    else:
-        atual = val
+    atual = val.split("/")[-1] if "/" in val else val
     if atual == "2u": return "background-color: lightgreen; color:black;"
     if atual == "2d": return "background-color: tomato; color:black;"
     if atual == "3": return "background-color: orange; color:white;"
     if atual == "1": return "background-color: violet; color:white;"
     return ""
 
-st.write("**Classificação (anterior/atual)**")
-if {"Daily","Weekly"}.issubset(df_status.columns):
-    st.dataframe(
-        df_status.style.applymap(highlight, subset=["Daily","Weekly"]),
-        use_container_width=True, height=400
-    )
-else:
-    st.dataframe(df_status, use_container_width=True, height=400)
+st.dataframe(df_status.style.applymap(highlight, subset=["Daily","Weekly"]),
+             use_container_width=True, height=600)
 
-st.caption("Versão MVP com cadastro individual + em massa, edição, exclusão e classificação Daily/Weekly.")
+# ==========================================
+# Editor Sub_Group
+# ==========================================
+st.subheader("✏️ Editar Sub-Grupo")
+edit_symbol = st.selectbox("Escolha um símbolo", df_master["Symbol"].tolist())
+new_group = st.text_input("Novo Sub-Grupo", "")
+if st.button("Salvar Sub-Grupo"):
+    df_master.loc[df_master["Symbol"] == edit_symbol, "Sub_Group"] = new_group
+    df_master.to_csv("simbolos700.csv", index=False)
+    st.success(f"Sub-Grupo '{new_group}' salvo para {edit_symbol}")
+    time.sleep(0.7)
+    st.rerun()
