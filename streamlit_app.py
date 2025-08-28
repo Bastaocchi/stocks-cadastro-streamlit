@@ -8,7 +8,7 @@ import streamlit as st
 # Config inicial
 # ==========================================
 st.set_page_config(page_title="Scanner TheStrat", page_icon="📊", layout="wide")
-st.title("📊 Scanner TheStrat – Lógica Colab")
+st.title("📊 Scanner TheStrat – Lógica Colab + Relatório")
 
 # ==========================================
 # Carregar base oficial
@@ -26,13 +26,16 @@ def load_data():
 df_master = load_data()
 
 # ==========================================
-# Função candle_type (igual Colab)
+# Função candle_type (robusta)
 # ==========================================
 def candle_type(prev, curr):
-    prev_high = float(prev['High'])
-    prev_low  = float(prev['Low'])
-    curr_high = float(curr['High'])
-    curr_low  = float(curr['Low'])
+    try:
+        prev_high = float(prev['High'])
+        prev_low  = float(prev['Low'])
+        curr_high = float(curr['High'])
+        curr_low  = float(curr['Low'])
+    except Exception:
+        return "—"   # se faltar dado
 
     if curr_high <= prev_high and curr_low >= prev_low:
         return "1"
@@ -48,14 +51,19 @@ def candle_type(prev, curr):
 def classify_pair(symbol):
     out = {}
     for tf_name, tf_interval in {"Daily":"1d", "Weekly":"1wk"}.items():
-        df = yf.download(symbol, period="1y", interval=tf_interval,
-                         progress=False, auto_adjust=True)
-        if len(df) < 3:
-            out[tf_name] = "N/A"
-            continue
-        tipo_ultima = candle_type(df.iloc[-2], df.iloc[-1])
-        tipo_anterior = candle_type(df.iloc[-3], df.iloc[-2])
-        out[tf_name] = f"{tipo_anterior}/{tipo_ultima}"
+        try:
+            df = yf.download(symbol, period="1y", interval=tf_interval,
+                             progress=False, auto_adjust=True)
+            df = df.dropna()
+            if len(df) < 3:
+                out[tf_name] = "—"
+                continue
+
+            tipo_ultima = candle_type(df.iloc[-2], df.iloc[-1])
+            tipo_anterior = candle_type(df.iloc[-3], df.iloc[-2])
+            out[tf_name] = f"{tipo_anterior}/{tipo_ultima}"
+        except Exception:
+            out[tf_name] = "—"
     return out
 
 # ==========================================
@@ -169,9 +177,26 @@ with tab2:
 
         st.markdown(f"### {title}")
         st.dataframe(styled, use_container_width=True, height=500)
+        return resumo
 
     colL, colR = st.columns(2)
     with colL:
-        make_report(df_master, "Daily", "📅 Daily")
+        resumo_daily = make_report(df_master, "Daily", "📅 Daily")
     with colR:
-        make_report(df_master, "Weekly", "📅 Weekly")
+        resumo_weekly = make_report(df_master, "Weekly", "📅 Weekly")
+
+    # ===============================
+    # Botão para download em Excel
+    # ===============================
+    output_file = "relatorio_setores.xlsx"
+    with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
+        resumo_daily.to_excel(writer, sheet_name="Daily")
+        resumo_weekly.to_excel(writer, sheet_name="Weekly")
+
+    with open(output_file, "rb") as f:
+        st.download_button(
+            label="📥 Baixar Relatório em Excel",
+            data=f,
+            file_name="relatorio_setores.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
