@@ -13,11 +13,14 @@ st.title("📊 Scanner TheStrat – Estilo Dashboard")
 # ==========================================
 # Carregar base oficial
 # ==========================================
-@st.cache_data
 def load_data():
-    df = pd.read_csv("data/simbolos700.csv")  # caminho fixo
+    df = pd.read_csv("data/simbolos700.csv")
     if "Sub_Group" not in df.columns:
         df["Sub_Group"] = ""  # garante coluna extra
+    if "Daily" not in df.columns:
+        df["Daily"] = ""
+    if "Weekly" not in df.columns:
+        df["Weekly"] = ""
     return df
 
 df_master = load_data()
@@ -52,6 +55,25 @@ def classify_pair(symbol):
     return out
 
 # ==========================================
+# Botão de atualização
+# ==========================================
+if st.button("🔄 Atualizar dados"):
+    st.info("⏳ Atualizando dados, aguarde...")
+    rows = []
+    for sym in df_master["Symbol"].tolist():
+        try:
+            pair = classify_pair(sym)
+            df_master.loc[df_master["Symbol"] == sym, "Daily"] = pair["Daily"]
+            df_master.loc[df_master["Symbol"] == sym, "Weekly"] = pair["Weekly"]
+        except Exception:
+            df_master.loc[df_master["Symbol"] == sym, "Daily"] = "—"
+            df_master.loc[df_master["Symbol"] == sym, "Weekly"] = "—"
+    df_master.to_csv("data/simbolos700.csv", index=False)
+    st.success("✅ Dados atualizados e salvos no CSV!")
+    time.sleep(0.7)
+    st.rerun()
+
+# ==========================================
 # Filtros no TOPO
 # ==========================================
 col1, col2, col3, col4 = st.columns([2,2,2,2])
@@ -64,35 +86,28 @@ with col3:
 with col4:
     search_symbol = st.text_input("🔍 Buscar símbolo").upper().strip()
 
-# Filtrar
+# Aplicar filtros
 filtered = df_master.copy()
 if etf: filtered = filtered[filtered["ETF_Symbol"] == etf]
 if industry: filtered = filtered[filtered["TradingView_Industry"] == industry]
 if sub_group: filtered = filtered[filtered["Sub_Group"] == sub_group]
 if search_symbol: filtered = filtered[filtered["Symbol"].str.contains(search_symbol)]
 
-st.markdown(f"**Total de símbolos filtrados:** {len(filtered)}")
-
 # ==========================================
-# Classificação TheStrat (limitada para não travar)
+# Filtros de padrão (Daily / Weekly)
 # ==========================================
-rows = []
-subset = filtered.head(50)  # limite inicial p/ performance
-for sym in subset["Symbol"].tolist():
-    try:
-        pair = classify_pair(sym)
-        rows.append({
-            "Symbol": sym,
-            "Daily": pair["Daily"],
-            "Weekly": pair["Weekly"],
-            "Sector": filtered.loc[filtered["Symbol"]==sym,"Sector_SPDR"].values[0],
-            "Industry": filtered.loc[filtered["Symbol"]==sym,"TradingView_Industry"].values[0],
-            "Sub_Group": filtered.loc[filtered["Symbol"]==sym,"Sub_Group"].values[0]
-        })
-    except Exception:
-        rows.append({"Symbol": sym, "Daily":"—", "Weekly":"—"})
+colA, colB = st.columns(2)
+with colA:
+    daily_filter = st.selectbox("📅 Filtro Daily", [""] + sorted(filtered["Daily"].dropna().unique()))
+with colB:
+    weekly_filter = st.selectbox("📅 Filtro Weekly", [""] + sorted(filtered["Weekly"].dropna().unique()))
 
-df_status = pd.DataFrame(rows)
+if daily_filter:
+    filtered = filtered[filtered["Daily"].str.contains(daily_filter)]
+if weekly_filter:
+    filtered = filtered[filtered["Weekly"].str.contains(weekly_filter)]
+
+st.markdown(f"**🔎 Símbolos após filtros: {len(filtered)}**")
 
 # ==========================================
 # Coloração estilo Pure Alpha
@@ -106,7 +121,8 @@ def highlight(val):
     if atual == "1": return "background-color: mediumslateblue; color:white; font-weight:bold;"
     return ""
 
-st.dataframe(df_status.style.applymap(highlight, subset=["Daily","Weekly"]),
+st.dataframe(filtered[["Symbol","Daily","Weekly","Sector_SPDR","TradingView_Industry","Sub_Group"]]
+             .style.applymap(highlight, subset=["Daily","Weekly"]),
              use_container_width=True, height=600)
 
 # ==========================================
@@ -116,11 +132,11 @@ st.subheader("📊 Resumo por Setor")
 
 summary = []
 for sector in df_master["Sector_SPDR"].unique():
-    subset = df_status[df_status["Sector"] == sector]
-    if len(subset) == 0: continue
-    total = len(subset)
-    count_2u = sum(subset["Daily"].str.endswith("2u"))
-    count_2d = sum(subset["Daily"].str.endswith("2d"))
+    subset_sec = filtered[filtered["Sector_SPDR"] == sector]
+    if len(subset_sec) == 0: continue
+    total = len(subset_sec)
+    count_2u = sum(subset_sec["Daily"].str.endswith("2u"))
+    count_2d = sum(subset_sec["Daily"].str.endswith("2d"))
     summary.append({
         "Sector": sector,
         "Total": total,
