@@ -7,8 +7,8 @@ import streamlit as st
 # ==========================================
 # Config inicial
 # ==========================================
-st.set_page_config(page_title="Scanner TheStrat", page_icon="📈", layout="wide")
-st.title("📈 Scanner TheStrat – Base 700 Símbolos")
+st.set_page_config(page_title="Scanner TheStrat", page_icon="📊", layout="wide")
+st.title("📊 Scanner TheStrat – Estilo Dashboard")
 
 # ==========================================
 # Carregar base oficial
@@ -52,22 +52,29 @@ def classify_pair(symbol):
     return out
 
 # ==========================================
-# Filtros
+# Filtros no TOPO
 # ==========================================
-st.sidebar.header("Filtros")
-etf = st.sidebar.selectbox("🎯 ETF (XLK, XLY...)", [""] + sorted(df_master["ETF_Symbol"].unique()))
-industry = st.sidebar.selectbox("🏭 Indústria", [""] + sorted(df_master["TradingView_Industry"].unique()))
-sub_group = st.sidebar.selectbox("🔖 Sub-Grupo", [""] + sorted(df_master["Sub_Group"].dropna().unique()))
+col1, col2, col3, col4 = st.columns([2,2,2,2])
+with col1:
+    etf = st.selectbox("🎯 ETF", [""] + sorted(df_master["ETF_Symbol"].unique()))
+with col2:
+    industry = st.selectbox("🏭 Indústria", [""] + sorted(df_master["TradingView_Industry"].unique()))
+with col3:
+    sub_group = st.selectbox("🔖 Sub-Grupo", [""] + sorted(df_master["Sub_Group"].dropna().unique()))
+with col4:
+    search_symbol = st.text_input("🔍 Buscar símbolo").upper().strip()
 
+# Filtrar
 filtered = df_master.copy()
 if etf: filtered = filtered[filtered["ETF_Symbol"] == etf]
 if industry: filtered = filtered[filtered["TradingView_Industry"] == industry]
 if sub_group: filtered = filtered[filtered["Sub_Group"] == sub_group]
+if search_symbol: filtered = filtered[filtered["Symbol"].str.contains(search_symbol)]
 
-st.write(f"### 🎯 Total de símbolos filtrados: {len(filtered)}")
+st.markdown(f"**Total de símbolos filtrados:** {len(filtered)}")
 
 # ==========================================
-# Classificação TheStrat (limitando para não travar)
+# Classificação TheStrat (limitada para não travar)
 # ==========================================
 rows = []
 subset = filtered.head(50)  # limite inicial p/ performance
@@ -88,19 +95,47 @@ for sym in subset["Symbol"].tolist():
 df_status = pd.DataFrame(rows)
 
 # ==========================================
-# Coloração estilo Excel
+# Coloração estilo Pure Alpha
 # ==========================================
 def highlight(val):
     if not isinstance(val, str): return ""
     atual = val.split("/")[-1] if "/" in val else val
-    if atual == "2u": return "background-color: lightgreen; color:black;"
-    if atual == "2d": return "background-color: tomato; color:black;"
-    if atual == "3": return "background-color: orange; color:white;"
-    if atual == "1": return "background-color: violet; color:white;"
+    if atual == "2u": return "background-color: limegreen; color:black; font-weight:bold;"
+    if atual == "2d": return "background-color: crimson; color:white; font-weight:bold;"
+    if atual == "3": return "background-color: orange; color:white; font-weight:bold;"
+    if atual == "1": return "background-color: mediumslateblue; color:white; font-weight:bold;"
     return ""
 
 st.dataframe(df_status.style.applymap(highlight, subset=["Daily","Weekly"]),
              use_container_width=True, height=600)
+
+# ==========================================
+# Resumo setorial (% 2u / 2d)
+# ==========================================
+st.subheader("📊 Resumo por Setor")
+
+summary = []
+for sector in df_master["Sector_SPDR"].unique():
+    subset = df_status[df_status["Sector"] == sector]
+    if len(subset) == 0: continue
+    total = len(subset)
+    count_2u = sum(subset["Daily"].str.endswith("2u"))
+    count_2d = sum(subset["Daily"].str.endswith("2d"))
+    summary.append({
+        "Sector": sector,
+        "Total": total,
+        "%2u": round(count_2u/total*100,1),
+        "%2d": round(count_2d/total*100,1),
+    })
+
+df_summary = pd.DataFrame(summary)
+
+cols = st.columns(len(df_summary))
+for i, row in df_summary.iterrows():
+    with cols[i]:
+        st.metric(label=row["Sector"],
+                  value=f"2u {row['%2u']}% | 2d {row['%2d']}%",
+                  delta=f"Total {row['Total']}")
 
 # ==========================================
 # Editor Sub_Group
